@@ -283,7 +283,6 @@ function drawOne(s) {
   const P = s.pts.map(p => toV(p[0], p[1]));
   if ($('ant').checked) P.forEach((v, i) => pin(s.g, toLL(mul(v, -1)), 'Antipode of ' + LABELS[s.type][i], s.color, 'anti'));
   const out = h => { const e = $('st-' + s.id); if (e) e.innerHTML = h; };
-  s.markers.forEach((m, i) => m.setIcon(pinIcon(LABELS[s.type][i], s.color)));
   s.fit = s.pts;
   if (s.type === 'circle') {
     const rho = s.r / R, ring = ringPts(P[0], rho);
@@ -369,7 +368,7 @@ $('list').addEventListener('input', e => {
   const f = e.target.dataset.f; if (!f) return;
   const s = shapes.find(x => x.id == e.target.closest('.card').dataset.id);
   if (f === 'name') s.name = e.target.value;
-  if (f === 'color') { s.color = e.target.value; e.target.closest('.card').style.borderLeftColor = s.color; draw(s); }
+  if (f === 'color') { s.color = e.target.value; s.markers.forEach((m, i) => m.setIcon(pinIcon(LABELS[s.type][i], s.color))); if (s.qm) s.qm.setIcon(pinIcon('Q', s.color)); e.target.closest('.card').style.borderLeftColor = s.color; draw(s); }
   if (f === 'r') { const v = parseFloat(e.target.value); if (v > 0) { s.r = Math.min(v * U[unit], Math.PI * R * 0.999); draw(s); } }
   if (f === 'brg') { const v = parseFloat(e.target.value); if (isFinite(v)) { s.brg = v; draw(s); } }
   if (f === 'rhumb') { s.rhumb = e.target.checked; draw(s); }
