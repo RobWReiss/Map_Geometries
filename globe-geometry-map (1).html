@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>Globe Geometry Map</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+:root{--bg:#f3f5f2;--panel:#fbfcfa;--ink:#1c2a2a;--mute:#5f6e6c;--line:#d3dad6;--accent:#0e7c86}
+@media (prefers-color-scheme:dark){:root{--bg:#141a1b;--panel:#1b2324;--ink:#e4ecea;--mute:#93a3a1;--line:#2f3b3c;--accent:#4cc3cf}}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{display:flex;font:14px/1.4 "Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink)}
+#side{width:330px;max-width:100%;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;z-index:2}
+#side header{padding:12px 14px;border-bottom:1px solid var(--line)}
+h1{font:600 17px Georgia,"Times New Roman",serif;margin:0 0 8px}
+.tools{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+button,select,input{font:inherit;color:var(--ink)}
+button{background:transparent;border:1px solid var(--line);border-radius:6px;padding:6px 8px;cursor:pointer}
+button:hover{border-color:var(--accent)}
+button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+input,select{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:5px 7px;min-width:0}
+.bar{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.bar input[type=search]{flex:1}
+#hint{padding:8px 14px;background:var(--accent);color:#fff;display:none}
+#list{flex:1;overflow:auto;padding:10px;display:flex;flex-direction:column;gap:10px}
+.card{border:1px solid var(--line);border-left-width:5px;border-radius:8px;padding:8px}
+.row{display:flex;gap:5px;align-items:center;margin-bottom:5px}
+.row .name{flex:1}
+.row button{padding:3px 7px}
+input[type=color]{padding:0;width:28px;height:28px}
+.stats{color:var(--mute);font-size:12.5px}
+.empty{color:var(--mute);padding:8px}
+#map{flex:1;min-height:0}
+#coords{position:absolute;right:8px;bottom:22px;z-index:1000;background:var(--panel);padding:2px 8px;border-radius:5px;font-size:12px;border:1px solid var(--line)}
+.pin{width:24px;height:24px;border-radius:50%;color:#fff;font:700 12px/20px sans-serif;text-align:center;border:2px solid #fff;box-shadow:0 0 0 1px #0006}
+.mid{width:14px;height:14px;background:#fff;border:3px solid;transform:rotate(45deg);box-shadow:0 0 0 1px #0006}
+.hnd{width:14px;height:14px;background:#fff;border:2px solid #000;border-radius:3px;cursor:ew-resize}
+.leaflet-container.adding{cursor:crosshair}
+.anti{width:14px;height:14px;border:2px dashed;border-radius:50%;background:#fffa}
+.lbl{background:var(--panel);color:var(--ink);border:1px solid var(--line);font-size:11px;padding:1px 5px}
+.opt{display:flex;gap:4px;align-items:center;margin-right:6px;font-size:13px}
+#side header{max-height:60%;overflow:auto}
+#notice{display:none;position:fixed;top:10px;left:50%;transform:translateX(-50%);max-width:min(580px,92vw);z-index:1200;background:var(--panel);border:1px solid var(--accent);border-radius:8px;padding:10px 12px;font-size:13px;box-shadow:0 2px 10px #0004}
+#notice button{float:right;margin-left:8px;padding:2px 8px}
+#notice code{background:var(--bg);padding:1px 4px;border-radius:4px}
+@media (max-width:760px){body{flex-direction:column-reverse}#side{width:100%;height:44vh;border-right:0;border-top:1px solid var(--line)}}
+</style>
+</head>
+<body>
+<aside id="side">
+  <header>
+    <h1>Globe Geometry Map</h1>
+    <div class="tools">
+      <button data-tool="circle" title="Centre point + radius">◯ Radius</button>
+      <button data-tool="line" title="Great-circle line through two points">╱ Line</button>
+      <button data-tool="tri" title="Circle through three points">△ 3-point</button>
+      <button data-tool="ruler" title="Distance and bearing between two points">↔ Ruler</button>
+      <button data-tool="dest" title="Start point, bearing and distance">➤ Destination</button>
+    </div>
+    <div class="bar">
+      <input type="search" id="q" placeholder="Search a place" aria-label="Search a place">
+      <button id="go">Go</button>
+    </div>
+    <div class="bar">
+      <select id="unit" aria-label="Units"><option value="km">km</option><option value="mi">miles</option><option value="nmi">nautical mi</option><option value="m">metres</option></select>
+      <button id="exp">Export data</button><button id="imp">Import data</button><button id="img" title="Saves your shapes on a plain background (map tiles are not copied, per the OSM tile policy)">Save image</button><button id="clr">Clear all</button>
+      <input type="file" id="file" accept=".json" hidden>
+    </div>
+    <div class="bar">
+      <label class="opt"><input type="checkbox" id="lab"> Coordinate labels</label>
+      <select id="dp" aria-label="Decimal places"><option>2</option><option>3</option><option selected>4</option><option>5</option><option>6</option></select><span class="stats">decimals</span>
+      <label class="opt"><input type="checkbox" id="ovl" checked> Shade overlaps</label>
+      <label class="opt"><input type="checkbox" id="ant"> Antipodes</label>
+    </div>
+  </header>
+  <div id="hint"></div>
+  <div id="list"></div>
+</aside>
+<div id="map"></div>
+<div id="notice" role="status"></div>
+<div id="coords">–</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+/* ---------- Spherical maths (all geometry is done on a sphere, then projected) ---------- */
+const R = 6371008.8, D = Math.PI / 180;
+const U = { km: 1000, mi: 1609.344, nmi: 1852, m: 1 };
+const toV = (la, ln) => { la *= D; ln *= D; return [Math.cos(la)*Math.cos(ln), Math.cos(la)*Math.sin(ln), Math.sin(la)]; };
+const toLL = v => [Math.asin(Math.max(-1, Math.min(1, v[2]))) / D, Math.atan2(v[1], v[0]) / D];
+const dot = (a, b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+const cross = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+const len = a => Math.hypot(a[0], a[1], a[2]);
+const nrm = a => { const l = len(a); return a.map(x => x / l); };
+const add = (a, b) => a.map((x, i) => x + b[i]);
+const sub = (a, b) => a.map((x, i) => x - b[i]);
+const mul = (a, k) => a.map(x => x * k);
+const ang = (a, b) => Math.atan2(len(cross(a, b)), dot(a, b));
+
+function basis(c) { let e = cross([0,0,1], c); if (len(e) < 1e-9) e = [0,1,0]; e = nrm(e); return [e, cross(c, e)]; }
+// point at angular distance rho from c along bearing b
+function dir(c, b, rho) {
+  const [e, n] = basis(c);
+  const d = add(mul(n, Math.cos(b)), mul(e, Math.sin(b)));
+  return add(mul(c, Math.cos(rho)), mul(d, Math.sin(rho)));
+}
+const ringPts = (c, rho) => { const a = []; for (let i = 0; i <= 240; i++) a.push(toLL(dir(c, i/240*2*Math.PI, rho))); return a; };
+function arc(a, b, n = 40) {
+  const t = ang(a, b); if (t < 1e-9) return [toLL(a), toLL(b)];
+  const s = Math.sin(t), out = [];
+  for (let i = 0; i <= n; i++) { const f = i / n; out.push(toLL(add(mul(a, Math.sin((1-f)*t)/s), mul(b, Math.sin(f*t)/s)))); }
+  return out;
+}
+
+/* ---------- Drawing helpers ---------- */
+// Unwrap longitudes so lines don't jump across the antimeridian; break at poles.
+function segs(pts) {
+  const out = []; let cur = [], pl = null;
+  for (const [la, ln0] of pts) {
+    let ln = ln0;
+    if (pl !== null) {
+      while (ln - pl > 180) ln -= 360;
+      while (ln - pl < -180) ln += 360;
+      if (Math.abs(ln - pl) >= 90 && Math.abs(la) > 80) { out.push(cur); cur = []; }
+    }
+    cur.push([Math.max(-85, Math.min(85, la)), ln]); pl = ln;
+  }
+  out.push(cur); return out;
+}
+// Draw copies at -360/0/+360 so shapes stay visible when the map wraps
+function shape(g, pts, o, closed, cap) {
+  let ss = segs(pts);
+  // A filled circle that encloses a pole never closes in longitude: close it along the map edge
+  if (closed && cap && o.fill !== false && ss.length === 1) {
+    const a = ss[0], z = a[a.length - 1];
+    if (Math.abs(Math.abs(z[1] - a[0][1]) - 360) < 1) {
+      const pole = ang(cap.c, [0, 0, 1]) < cap.rho ? 85 : -85;
+      ss = [[...a, [pole, z[1]], [pole, a[0][1]]]];
+    }
+  }
+  const isClosed = closed && ss.length === 1 && Math.abs(ss[0][ss[0].length-1][1] - ss[0][0][1]) < 1;
+  for (const s of ss) for (const off of [-360, 0, 360]) {
+    const ll = s.map(p => [p[0], p[1] + off]);
+    (isClosed ? L.polygon(ll, o) : L.polyline(ll, { ...o, fill: false })).addTo(g);
+  }
+}
+const pinIcon = (t, c) => L.divIcon({ className: '', html: `<div class="pin" style="background:${c}">${t}</div>`, iconSize: [24, 24], iconAnchor: [12, 12] });
+function pin(g, ll, label, c, cls = 'mid') {
+  const perm = cls === 'mid' && $('lab').checked;
+  L.marker(ll, { icon: L.divIcon({ className: '', html: `<div class="${cls}" style="border-color:${c}"></div>`, iconSize: [14, 14], iconAnchor: [7, 7] }) })
+    .bindTooltip(perm ? fmtLL(ll) : `${label}<br>${fmtLL(ll)}`, { permanent: perm, direction: 'right', offset: [10, 0], className: perm ? 'lbl' : '' }).addTo(g);
+}
+
+/* ---------- State ---------- */
+const map = L.map('map', { worldCopyJump: true, zoomSnap: 0.5 }).setView([30, 10], 2.5);
+// OSM tile usage policy: https://operations.osmfoundation.org/policies/tiles/
+const TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';   // change here to switch tile provider
+const ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors · <a href="https://www.openstreetmap.org/fixthemap" target="_blank" rel="noopener">Report a map issue</a>';
+function notice(html) {
+  const n = document.getElementById('notice');
+  n.innerHTML = '<button onclick="this.parentNode.style.display=\'none\'" aria-label="Dismiss">✕</button>' + html; n.style.display = 'block';
+}
+if (location.protocol === 'file:') {
+  // Browsers send no Referer from a local file, which the OSM policy requires, so don't send tile requests at all.
+  notice('<b>Map tiles are off.</b> This page was opened as a local file, so your browser sends no <code>Referer</code> header, which OpenStreetMap requires. Serve it over http instead: run <code>python3 -m http.server 8000</code> in this file’s folder and open <code>http://localhost:8000/globe-geometry-map.html</code>, or upload it to any web host. Your shapes still work without tiles.');
+} else {
+  const tiles = L.tileLayer(TILE_URL, { maxZoom: 19, attribution: ATTR, referrerPolicy: 'strict-origin-when-cross-origin', updateWhenIdle: true, updateWhenZooming: false }).addTo(map);
+  let warned = false;
+  tiles.on('tileerror', () => { if (warned) return; warned = true;
+    notice('<b>OpenStreetMap refused some map tiles.</b> This is usually a missing <code>Referer</code> header: a privacy extension, a strict browser setting, or a sandboxed preview can strip it. Open the file from a normal http(s) address and allow referrers for <code>tile.openstreetmap.org</code>.'); });
+}
+const $ = id => document.getElementById(id);
+const palette = ['#d9480f', '#1c7ed6', '#2f9e44', '#ae3ec9', '#e8590c', '#0c8599'];
+const NEED = { circle: 1, line: 2, tri: 3, ruler: 2, dest: 1 }, LABELS = { circle: ['C'], line: ['A','B'], tri: ['A','B','C'], ruler: ['A','B'], dest: ['S'] };
+const TITLE = { circle: 'Radius', line: 'Line', tri: '3-point circle', ruler: 'Ruler', dest: 'Destination' };
+let shapes = [], uid = 1, unit = 'km', add_ = null;
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
+const fmtLL = p => `${(+p[0]).toFixed(+$('dp').value)}, ${(+p[1]).toFixed(+$('dp').value)}`;
+const fmtIn = p => `${(+p[0]).toFixed(5)}, ${(+p[1]).toFixed(5)}`;
+const ser = ({ type, pts, r, color, name, vis, brg, rhumb, q }) => ({ type, pts, r, color, name, vis, brg, rhumb, q });
+const fmt = m => (m / U[unit]).toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' ' + unit;
+const fmtA = m2 => (m2 / U[unit] ** 2).toLocaleString(undefined, { maximumFractionDigits: 0 }) + ' ' + unit + '²';
+
+function save() {
+  try { localStorage.setItem('globegeo', JSON.stringify(shapes.map(ser))); } catch (e) {}
+}
+
+/* ---------- Extra features ---------- */
+const brg = (a, b) => { const [e, n] = basis(a); return (Math.atan2(dot(b, e), dot(b, n)) / D + 360) % 360; };
+const ovl = L.layerGroup().addTo(map);
+
+// Constant-bearing (rhumb) segment: a straight line on the Mercator map
+function rh(s) {
+  if (!s.rhumb) return '';
+  const p = s.pts[0], q = s.pts[1], f1 = p[0]*D, f2 = q[0]*D, df = f2 - f1;
+  let dl = (q[1] - p[1]) * D;
+  while (dl > Math.PI) dl -= 2*Math.PI; while (dl < -Math.PI) dl += 2*Math.PI;
+  const dpsi = Math.log(Math.tan(Math.PI/4 + f2/2) / Math.tan(Math.PI/4 + f1/2));
+  const qq = Math.abs(dpsi) > 1e-12 ? df / dpsi : Math.cos(f1);
+  shape(s.g, [p, q], { color: s.color, weight: 2, opacity: .9, dashArray: '2 6' });
+  return `<br>Constant bearing ${((Math.atan2(dl, dpsi) / D + 360) % 360).toFixed(1)}° · ${fmt(Math.hypot(df, qq*dl) * R)}`;
+}
+
+// Draggable "Q" point used for closest approach to a line
+function syncQ(s) {
+  if (s.q && !s.qm) {
+    s.qm = L.marker(s.q, { draggable: true, icon: pinIcon('Q', s.color), zIndexOffset: 500 });
+    if (s.vis) s.qm.addTo(map);
+    s.qm.on('drag', () => { const l = s.qm.getLatLng(); s.q = [l.lat, ((l.lng + 540) % 360) - 180]; draw(s); });
+    s.qm.on('dragend', save);
+  } else if (!s.q && s.qm) { s.qm.remove(); s.qm = null; }
+}
+
+// Overlap of two circles (spherical caps): boundary arcs of each circle that lie inside the other
+function lens(a, b) {
+  const inB = p => dot(toV(p[0], p[1]), b.c) > Math.cos(b.rho), inA = p => dot(toV(p[0], p[1]), a.c) > Math.cos(a.rho);
+  const r1 = ringPts(a.c, a.rho).slice(0, -1), r2 = ringPts(b.c, b.rho).slice(0, -1);
+  const run = (r, f) => {
+    const fl = r.map(f); if (fl.every(Boolean)) return r;
+    const k = fl.findIndex((v, i) => v && !fl[(i + r.length - 1) % r.length]); if (k < 0) return [];
+    const o = []; for (let i = 0; i < r.length && fl[(k + i) % r.length]; i++) o.push(r[(k + i) % r.length]); return o;
+  };
+  const A = run(r1, inB), B = run(r2, inA);
+  if (A.length === r1.length) return A;
+  if (B.length === r2.length) return B;
+  if (!A.length || !B.length) return [];
+  const d = (u, v) => len(sub(toV(u[0], u[1]), toV(v[0], v[1])));
+  const last = A[A.length - 1];
+  return A.concat(d(last, B[0]) <= d(last, B[B.length - 1]) ? B : [...B].reverse());
+}
+function drawOverlaps() {
+  ovl.clearLayers(); if (!$('ovl').checked) return;
+  const cs = shapes.filter(s => s.vis && s.cap);
+  for (let i = 0; i < cs.length; i++) for (let j = i + 1; j < cs.length; j++) {
+    const a = cs[i].cap, b = cs[j].cap; if (ang(a.c, b.c) >= a.rho + b.rho) continue;
+    const poly = lens(a, b); if (poly.length > 2) shape(ovl, poly, { stroke: false, fillColor: '#000', fillOpacity: .35 }, true);
+  }
+}
+
+// Per-shape inputs shown in the panel
+function extra(s) {
+  const lb = LABELS[s.type];
+  let h = s.pts.map((p, i) => `<div class="row"><label>${lb[i]}</label><input class="name" data-f="pt" data-i="${i}" value="${fmtIn(p)}" aria-label="Coordinates of point ${lb[i]}"></div>`).join('');
+  if (s.type === 'circle' || s.type === 'dest') h += `<div class="row"><label>${s.type === 'dest' ? 'Distance' : 'Radius'} (${unit})</label><input type="number" min="0" step="any" data-f="r" value="${+(s.r / U[unit]).toPrecision(6)}" style="width:110px"></div>`;
+  if (s.type === 'dest') h += `<div class="row"><label>Bearing °</label><input type="number" step="any" data-f="brg" value="${s.brg}" style="width:110px"></div>`;
+  if (s.type === 'line' || s.type === 'ruler') h += `<label class="opt"><input type="checkbox" data-f="rhumb" ${s.rhumb ? 'checked' : ''}> Constant-bearing line</label>`;
+  if (s.type === 'line') h += `<label class="opt"><input type="checkbox" data-f="q" ${s.q ? 'checked' : ''}> Closest point to Q</label>`;
+  return h;
+}
+
+/* ---------- Shapes ---------- */
+function build(d) {
+  const s = { id: uid++, type: d.type, pts: d.pts.map(p => [...p]), r: d.r || 500000, brg: d.brg ?? 90, rhumb: !!d.rhumb, q: d.q || null, color: d.color || palette[shapes.length % palette.length],
+              name: d.name || `${TITLE[d.type]} ${shapes.filter(x => x.type === d.type).length + 1}`, vis: d.vis !== false };
+  s.g = L.layerGroup().addTo(map);
+  s.markers = s.pts.map((p, i) => {
+    const m = L.marker(p, { draggable: true, icon: pinIcon(LABELS[s.type][i], s.color), zIndexOffset: 500 }).addTo(map);
+    m.on('drag', () => { const ll = m.getLatLng(); s.pts[i] = [Math.max(-89.9, Math.min(89.9, ll.lat)), ((ll.lng + 540) % 360) - 180]; draw(s); });
+    m.on('dragend', save);
+    return m;
+  });
+  if (s.type === 'circle') {
+    s.handle = L.marker([0, 0], { draggable: true, zIndexOffset: 400, icon: L.divIcon({ className: '', html: '<div class="hnd" title="Drag to resize"></div>', iconSize: [14, 14], iconAnchor: [7, 7] }) }).addTo(map);
+    s.handle.on('dragstart', () => s.hDrag = true);
+    s.handle.on('drag', () => {
+      const ll = s.handle.getLatLng();
+      s.r = Math.max(1, Math.min(ang(toV(...s.pts[0]), toV(ll.lat, ll.lng)) * R, Math.PI * R * 0.999));
+      draw(s); const inp = document.querySelector(`[data-id="${s.id}"] [data-f=r]`); if (inp) inp.value = +(s.r / U[unit]).toPrecision(6);
+    });
+    s.handle.on('dragend', () => { s.hDrag = false; draw(s); save(); });
+  }
+  shapes.push(s); if (!s.vis) setVis(s); return s;
+}
+
+const draw = s => { drawOne(s); drawOverlaps(); };
+function drawOne(s) {
+  s.g.clearLayers(); s.cap = null; syncQ(s);
+  const card = document.querySelector(`[data-id="${s.id}"]`);
+  if (card) card.querySelectorAll('[data-f=pt]').forEach(inp => { if (document.activeElement !== inp) inp.value = fmtIn(s.pts[inp.dataset.i]); });
+  const o = { color: s.color, weight: 3, opacity: .95 }, fill = { ...o, fillColor: s.color, fillOpacity: .14 };
+  const P = s.pts.map(p => toV(p[0], p[1]));
+  if ($('ant').checked) P.forEach((v, i) => pin(s.g, toLL(mul(v, -1)), 'Antipode of ' + LABELS[s.type][i], s.color, 'anti'));
+  const out = h => { const e = $('st-' + s.id); if (e) e.innerHTML = h; };
+  s.markers.forEach((m, i) => m.setIcon(pinIcon(LABELS[s.type][i], s.color)));
+  s.fit = s.pts;
+  if (s.type === 'circle') {
+    const rho = s.r / R, ring = ringPts(P[0], rho);
+    s.cap = { c: P[0], rho }; shape(s.g, ring, fill, true, s.cap); s.fit = ring;
+    const m0 = s.markers[0];
+    if ($('lab').checked) { if (m0.getTooltip()) m0.setTooltipContent(fmtLL(s.pts[0])); else m0.bindTooltip(fmtLL(s.pts[0]), { permanent: true, direction: 'right', offset: [12, 0], className: 'lbl' }); }
+    else if (m0.getTooltip()) m0.unbindTooltip();
+    if (!s.hDrag) s.handle.setLatLng(toLL(dir(P[0], Math.PI / 2, rho)));
+    out(`Centre ${fmtLL(s.pts[0])}<br>Circumference ${fmt(2*Math.PI*R*Math.sin(rho))}<br>Area ${fmtA(2*Math.PI*R*R*(1 - Math.cos(rho)))}`);
+  } else if (s.type === 'line') {
+    const n = cross(P[0], P[1]);
+    if (len(n) < 1e-9) return out('Points must be distinct and not exactly opposite.');
+    const w = cross(nrm(n), P[0]), gc = [];
+    for (let i = 0; i <= 360; i++) gc.push(toLL(add(mul(P[0], Math.cos(i*D)), mul(w, Math.sin(i*D)))));
+    shape(s.g, gc, { color: s.color, weight: 2, opacity: .8, dashArray: '6 6' });
+    shape(s.g, arc(P[0], P[1]), { ...o, weight: 4 });
+    const M = toLL(nrm(add(P[0], P[1])));
+    pin(s.g, M, 'Midpoint', s.color);
+    let t = `Distance A–B ${fmt(ang(P[0], P[1]) * R)}<br>Midpoint ${fmtLL(M)}<br>Line continues round the whole globe (great circle).` + rh(s);
+    if (s.q) {
+      const Q = toV(s.q[0], s.q[1]), nn = nrm(n), h = dot(Q, nn), pr = sub(Q, mul(nn, h));
+      if (len(pr) < 1e-9) t += '<br>Q is the pole of this line: every point is equally close.';
+      else {
+        const C = nrm(pr); pin(s.g, toLL(C), 'Closest point', s.color);
+        shape(s.g, arc(Q, C), { color: s.color, weight: 2, dashArray: '2 5' });
+        t += `<br>Closest point ${fmtLL(toLL(C))}<br>Q to line ${fmt(Math.abs(Math.asin(h)) * R)}`;
+      }
+    }
+    out(t);
+  } else if (s.type === 'tri') {
+    const n = cross(sub(P[1], P[0]), sub(P[2], P[0]));
+    if (len(n) < 1e-9) return out('Points must be three distinct locations.');
+    let c = nrm(n); if (dot(c, P[0]) < 0) c = mul(c, -1);
+    const rho = ang(c, P[0]), ring = ringPts(c, rho);
+    shape(s.g, ring, { color: s.color, weight: 2, opacity: .8, dashArray: '6 6', fill: false }, true);
+    const tri = [...arc(P[0], P[1]), ...arc(P[1], P[2]), ...arc(P[2], P[0])];
+    shape(s.g, tri, fill, true);
+    const C = toLL(c); pin(s.g, C, 'Circle centre', s.color);
+    [[0,1,'AB'],[1,2,'BC'],[2,0,'CA']].forEach(([a, b, l]) => pin(s.g, toLL(nrm(add(P[a], P[b]))), 'Midpoint ' + l, s.color));
+    s.fit = ring; s.cap = { c, rho };
+    out(`Centre ${fmtLL(C)}<br>Radius ${fmt(rho * R)}<br>Sides AB ${fmt(ang(P[0],P[1])*R)} · BC ${fmt(ang(P[1],P[2])*R)} · CA ${fmt(ang(P[2],P[0])*R)}`);
+  } else if (s.type === 'ruler') {
+    const a = ang(P[0], P[1]);
+    if (a < 1e-9 || a > Math.PI - 1e-9) return out('Points must be distinct and not exactly opposite.');
+    shape(s.g, arc(P[0], P[1]), { ...o, weight: 4 });
+    const M = toLL(nrm(add(P[0], P[1])));
+    pin(s.g, M, 'Midpoint', s.color);
+    out(`Distance ${fmt(a * R)}<br>Bearing A→B ${brg(P[0], P[1]).toFixed(1)}° · arriving ${((brg(P[1], P[0]) + 180) % 360).toFixed(1)}°<br>Midpoint ${fmtLL(M)}` + rh(s));
+  } else if (s.type === 'dest') {
+    const rho = s.r / R, path = [];
+    for (let i = 0; i <= 80; i++) path.push(toLL(dir(P[0], s.brg * D, rho * i / 80)));
+    const E = path[80];
+    shape(s.g, path, { ...o, weight: 4 }); s.fit = path;
+    pin(s.g, E, 'Destination', s.color);
+    out(`Start ${fmtLL(s.pts[0])}<br>Destination ${fmtLL(E)}<br>Arrival bearing ${((brg(toV(E[0], E[1]), P[0]) + 180) % 360).toFixed(1)}°`);
+  }
+}
+
+function setVis(s) {
+  const f = s.vis ? 'addTo' : 'remove';
+  [s.g, ...s.markers, s.handle, s.qm].filter(Boolean).forEach(l => s.vis ? l.addTo(map) : l.remove());
+}
+function remove(s) {
+  s.g.remove(); s.markers.forEach(m => m.remove()); if (s.handle) s.handle.remove(); if (s.qm) s.qm.remove();
+  shapes = shapes.filter(x => x !== s);
+}
+
+/* ---------- Panel ---------- */
+function renderPanel() {
+  const list = $('list'); list.innerHTML = '';
+  if (!shapes.length) list.innerHTML = '<div class="empty">Choose a tool above, then click the map to place its points. Drag any marker to edit.</div>';
+  shapes.forEach(s => {
+    const d = document.createElement('div'); d.className = 'card'; d.dataset.id = s.id; d.style.borderLeftColor = s.color;
+    d.innerHTML = `<div class="row"><input type="color" data-f="color" value="${s.color}" aria-label="Colour">
+      <input class="name" data-f="name" value="${esc(s.name)}" aria-label="Name">
+      <button data-a="vis" title="Show or hide">${s.vis ? 'Hide' : 'Show'}</button><button data-a="zoom" title="Zoom to">Zoom</button><button data-a="del" title="Delete">✕</button></div>
+      ${extra(s)}
+      <div class="stats" id="st-${s.id}"></div>`;
+    list.append(d); draw(s);
+  });
+}
+$('list').addEventListener('input', e => {
+  const f = e.target.dataset.f; if (!f) return;
+  const s = shapes.find(x => x.id == e.target.closest('.card').dataset.id);
+  if (f === 'name') s.name = e.target.value;
+  if (f === 'color') { s.color = e.target.value; e.target.closest('.card').style.borderLeftColor = s.color; draw(s); }
+  if (f === 'r') { const v = parseFloat(e.target.value); if (v > 0) { s.r = Math.min(v * U[unit], Math.PI * R * 0.999); draw(s); } }
+  if (f === 'brg') { const v = parseFloat(e.target.value); if (isFinite(v)) { s.brg = v; draw(s); } }
+  if (f === 'rhumb') { s.rhumb = e.target.checked; draw(s); }
+  if (f === 'q') { s.q = e.target.checked ? [map.getCenter().lat, map.getCenter().lng] : null; draw(s); }
+  save();
+});
+$('list').addEventListener('click', e => {
+  const a = e.target.dataset.a; if (!a) return;
+  const s = shapes.find(x => x.id == e.target.closest('.card').dataset.id);
+  if (a === 'del') { remove(s); renderPanel(); }
+  if (a === 'vis') { s.vis = !s.vis; setVis(s); e.target.textContent = s.vis ? 'Hide' : 'Show'; }
+  if (a === 'zoom') map.fitBounds(L.latLngBounds(s.fit.map(p => [p[0], p[1]])).pad(.2), { maxZoom: 12 });
+  save();
+});
+
+$('list').addEventListener('change', e => {
+  if (e.target.dataset.f !== 'pt') return;
+  const s = shapes.find(x => x.id == e.target.closest('.card').dataset.id), i = +e.target.dataset.i;
+  const v = e.target.value.split(/[\s,;]+/).filter(Boolean).map(Number);
+  if (v.length === 2 && v.every(isFinite) && Math.abs(v[0]) <= 89.9 && Math.abs(v[1]) <= 180) {
+    s.pts[i] = v; s.markers[i].setLatLng(v); draw(s); save();
+    if (!map.getBounds().contains(v)) map.panTo(v);
+  } else e.target.value = fmtIn(s.pts[i]);
+});
+
+/* ---------- Adding shapes ---------- */
+function setTool(t) {
+  if (add_) add_.tmp.forEach(m => m.remove());
+  add_ = t && add_?.type !== t ? { type: t, pts: [], tmp: [] } : null;
+  document.querySelectorAll('[data-tool]').forEach(b => b.classList.toggle('on', !!add_ && b.dataset.tool === add_.type));
+  map.getContainer().classList.toggle('adding', !!add_);
+  const h = $('hint');
+  if (add_) { h.style.display = 'block'; h.textContent = `Click point 1 of ${NEED[t]} on the map (Esc to cancel)`; } else h.style.display = 'none';
+}
+document.querySelectorAll('[data-tool]').forEach(b => b.onclick = () => setTool(b.dataset.tool));
+document.addEventListener('keydown', e => { if (e.key === 'Escape') setTool(null); });
+map.on('click', e => {
+  if (!add_) return;
+  add_.pts.push([e.latlng.lat, ((e.latlng.lng + 540) % 360) - 180]);
+  add_.tmp.push(L.circleMarker(e.latlng, { radius: 6, color: '#000', fillColor: '#fff', fillOpacity: 1 }).addTo(map));
+  if (add_.pts.length < NEED[add_.type]) { $('hint').textContent = `Click point ${add_.pts.length + 1} of ${NEED[add_.type]} on the map (Esc to cancel)`; return; }
+  const t = add_.type, pts = add_.pts; add_.tmp.forEach(m => m.remove()); add_ = null; setTool(null);
+  build({ type: t, pts }); renderPanel(); save();
+});
+map.on('mousemove', e => $('coords').textContent = fmtLL([e.latlng.lat, ((e.latlng.lng + 540) % 360) - 180]));
+
+/* ---------- Toolbar ---------- */
+['lab', 'dp', 'ovl', 'ant'].forEach(id => $(id).onchange = () => shapes.forEach(draw));
+$('img').onclick = async () => {
+  try {
+    if (!window.html2canvas) await new Promise((ok, no) => { const t = document.createElement('script'); t.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js'; t.onload = ok; t.onerror = no; document.head.append(t); });
+    const c = await html2canvas($('map'), { logging: false, backgroundColor: '#e9eeec', ignoreElements: el => el.classList && (el.classList.contains('leaflet-control-container') || el.classList.contains('leaflet-tile-pane')) });
+    const a = document.createElement('a'); a.href = c.toDataURL('image/png'); a.download = 'map.png'; a.click();
+  } catch (e) { alert('Image export failed. Check your connection.'); }
+};
+$('unit').onchange = e => { unit = e.target.value; renderPanel(); };
+$('clr').onclick = () => { if (shapes.length && confirm('Remove all shapes?')) { [...shapes].forEach(remove); renderPanel(); save(); } };
+$('exp').onclick = () => {
+  const data = JSON.stringify(shapes.map(ser), null, 2);
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([data], { type: 'application/json' })); a.download = 'map-shapes.json'; a.click();
+};
+$('imp').onclick = () => $('file').click();
+$('file').onchange = async e => {
+  try { JSON.parse(await e.target.files[0].text()).forEach(build); renderPanel(); save(); } catch (err) { alert('Could not read that file.'); }
+  e.target.value = '';
+};
+let lastSearch = 0;   // Nominatim policy: at most 1 request per second, only on explicit user action
+async function search() {
+  const q = $('q').value.trim(); if (!q || Date.now() - lastSearch < 1100) return;
+  lastSearch = Date.now();
+  try {
+    const r = await (await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(q))).json();
+    if (r[0]) map.flyTo([+r[0].lat, +r[0].lon], 10); else alert('No place found.');
+  } catch (e) { alert('Search failed. Check your connection.'); }
+}
+$('go').onclick = search; $('q').onkeydown = e => { if (e.key === 'Enter') search(); };
+
+/* ---------- Restore ---------- */
+try { (JSON.parse(localStorage.getItem('globegeo') || '[]')).forEach(build); } catch (e) {}
+renderPanel();
+</script>
+</body>
+</html>
